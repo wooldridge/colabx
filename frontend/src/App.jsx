@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, CalendarDays, CheckCircle2, ChevronDown, ChevronUp, CircleAlert, Clock, Cpu, Database, ExternalLink, Heart, Layers, PieChart, Server, Sparkles, Tag, TriangleAlert, X } from 'lucide-react';
+import { BarChart3, CalendarDays, CheckCircle2, ChevronDown, ChevronUp, CircleAlert, Clock, Cpu, Database, ExternalLink, Heart, Layers, MessageCircle, PieChart, RotateCcw, Send, Server, Sparkles, Tag, TriangleAlert, X } from 'lucide-react';
 import { createRows, statusPriority } from './status.js';
 
 const pageSize = 10;
@@ -67,6 +67,9 @@ function App() {
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
   const [aiSummary, setAiSummary] = useState({ status: 'idle', text: '' });
   const [investigation, setInvestigation] = useState({ status: 'idle', text: '' });
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatStatus, setChatStatus] = useState('idle');
   const [aiPanelCollapsed, setAiPanelCollapsed] = useState(false);
 
   async function loadData() {
@@ -126,6 +129,9 @@ function App() {
   }, [selectedRowId]);
 
   async function generateAiSummary(rowsForSummary) {
+    setChatMessages([]);
+    setChatInput('');
+    setChatStatus('idle');
     setAiSummary({ status: 'loading', text: '' });
     try {
       const response = await fetch('/api/insights/summary', {
@@ -155,6 +161,37 @@ function App() {
     } catch (requestError) {
       setInvestigation({ status: 'error', text: 'AI investigation is unavailable. Confirm Ollama is running.' });
     }
+  }
+
+  async function askFollowUp(event) {
+    event.preventDefault();
+    const question = chatInput.trim();
+    if (!question || chatStatus === 'loading') return;
+
+    const nextMessages = [...chatMessages, { role: 'user', content: question }];
+    setChatMessages(nextMessages);
+    setChatInput('');
+    setChatStatus('loading');
+    try {
+      const response = await fetch('/api/insights/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: scopedRows, summary: aiSummary.text, messages: nextMessages })
+      });
+      if (!response.ok) throw new Error(`Request failed with ${response.status}`);
+      const data = await response.json();
+      setChatMessages([...nextMessages, { role: 'assistant', content: data.answer || 'I could not find an answer in the current dashboard data.' }]);
+      setChatStatus('ready');
+    } catch (requestError) {
+      setChatMessages([...nextMessages, { role: 'assistant', content: 'The follow-up is unavailable. Confirm Ollama is running and try again.' }]);
+      setChatStatus('error');
+    }
+  }
+
+  function clearChat() {
+    setChatMessages([]);
+    setChatInput('');
+    setChatStatus('idle');
   }
 
   const categoryOptions = [...new Set(rows.map((row) => row.category))].sort((a, b) => a.localeCompare(b));
@@ -364,6 +401,33 @@ function App() {
           {aiSummary.status === 'idle' && <p className="ai-panel-note">Ask AI to summarize what needs attention across the pipelines currently in view.</p>}
           {aiSummary.status === 'error' && <p className="ai-panel-note ai-panel-error">{aiSummary.text}</p>}
           {aiSummary.status === 'ready' && <p className="ai-panel-text">{aiSummary.text || 'Everything looks healthy.'}</p>}
+          <div className="ai-chat">
+            {chatMessages.length > 0 && <div className="ai-chat-messages" aria-live="polite">
+              {chatMessages.map((message, index) => (
+                <div className={`ai-chat-message ai-chat-message-${message.role}`} key={`${message.role}-${index}`}>
+                  <span>{message.role === 'user' ? 'You' : 'AI'}</span>
+                  <p>{message.content}</p>
+                </div>
+              ))}
+            </div>}
+            <form className="ai-chat-form" onSubmit={askFollowUp}>
+              <MessageCircle size={17} aria-hidden="true" />
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(event) => setChatInput(event.target.value)}
+                placeholder="Ask a question about the pipelines in view"
+                aria-label="Ask a question about the pipelines in view"
+                maxLength={500}
+              />
+              <button type="button" className="ai-chat-clear" onClick={clearChat} aria-label="Start a new conversation" title="Start a new conversation" disabled={!chatMessages.length || chatStatus === 'loading'}>
+                <RotateCcw size={15} />
+              </button>
+              <button type="submit" aria-label="Send follow-up question" title="Send follow-up question" disabled={!chatInput.trim() || chatStatus === 'loading'}>
+                <Send size={16} />
+              </button>
+            </form>
+          </div>
         </div>}
       </section>}
 

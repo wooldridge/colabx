@@ -342,6 +342,26 @@ function buildInvestigationPrompt(row, historyRuns) {
   ].join('\n');
 }
 
+function buildChatPrompt(rows, summary, messages) {
+  const attentionRows = rows.filter((row) => row.status !== 'Healthy').slice(0, 60);
+  const rowLines = attentionRows.map((row) => (
+    `- ${row.category} | ML ${row.version} | ${row.dataCenter}/${row.architecture} | status=${row.status} | last run=${row.date || 'never'} | missing=[${missingPipelines(row).join(', ') || 'none'}]`
+  ));
+  const conversation = messages.slice(-8).map((message) => `${message.role === 'user' ? 'USER' : 'ASSISTANT'}: ${message.content}`);
+
+  return [
+    'You are a performance engineering assistant answering a follow-up question about a pipeline monitoring dashboard.',
+    'Answer only from the dashboard context below. If the data does not support an answer, say what is missing.',
+    'Be concise and practical. Use plain text with short paragraphs or bullets, and do not invent pipeline results.',
+    `Current generated summary: ${summary || '(no summary has been generated)'}`,
+    'Pipeline cells needing attention in the current view:',
+    rowLines.length ? rowLines.join('\n') : '(none; all visible cells are healthy)',
+    'Conversation:',
+    conversation.join('\n'),
+    'Answer the latest USER question.'
+  ].join('\n');
+}
+
 app.post('/api/insights/summary', async (request, response, next) => {
   try {
     const rows = Array.isArray(request.body?.rows) ? request.body.rows : [];
@@ -373,4 +393,24 @@ app.use((error, _request, response, _next) => {
 
 app.listen(port, () => {
   console.log(`Pipeline Pulse API listening on http://localhost:${port}`);
+});
+
+app.post('/api/insights/chat', async (request, response, next) => {
+  try {
+    const { rows, summary, messages } = request.body || {};
+    const userMessages = Array.isArray(messages) ? messages : [];
+    const latestMessage = userMessages.at(-1);
+    if (!Array.isArray(rows) || !latestMessage || latestMessage.role !== 'user' || typeof latestMessage.content !== 'string' || !latestMessage.content.trim()) {
+      response.status(400).json({ error: 'A follow-up question and dashboard rows are required.' });
+      return;
+    }
+    if (latestMessage.content.length > 500) {
+      response.status(400).json({ error: 'The follow-up question is too long.' });
+      return;
+    }
+    const answer = await askLlm(buildChatPrompt(rows, typeof summary === 'string' ? summary.slice(0, 2000) : '', userMessages));
+    response.json({ answer });
+  } catch (error) {
+    next(error);
+  }
 });

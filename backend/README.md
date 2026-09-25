@@ -35,7 +35,25 @@ GET  /api/pipeline-status
 GET  /api/pipeline-history
 POST /api/insights/summary
 POST /api/insights/investigate
+POST /api/insights/chat
 ```
+
+The chat endpoint accepts the rows currently visible in the dashboard, the
+latest generated summary, and the conversation turns:
+
+```json
+{
+	"rows": [],
+	"summary": "...",
+	"messages": [
+		{ "role": "user", "content": "Which pipelines need attention first?" }
+	]
+}
+```
+
+Questions are limited to 500 characters. The backend uses the latest eight
+conversation turns and up to 60 rows needing attention to keep the prompt
+focused. It returns the answer as `{ "answer": "..." }`.
 
 For each category, data center, architecture, and version, `GET /api/pipeline-status`
 invokes `/ext/find-perf-category-run-info.xqy` through MarkLogic's `/v1/invoke`
@@ -45,10 +63,12 @@ desktop app's `category-config.jsonc`.
 
 ## AI insights
 
-`POST /api/insights/summary` and `POST /api/insights/investigate` call the
-configured LLM provider to turn dashboard data into plain-language summaries
-and investigation suggestions. For local [Ollama](https://ollama.com), pull a
-model, for example:
+`POST /api/insights/summary`, `POST /api/insights/investigate`, and
+`POST /api/insights/chat` call the configured LLM provider to turn dashboard
+data into plain-language summaries, investigation suggestions, and follow-up
+answers. The chat prompt is scoped to the rows currently in view and includes
+the generated summary plus recent conversation turns. For local
+[Ollama](https://ollama.com), pull a model, for example:
 
 ```sh
 ollama pull llama3.1:8b
@@ -79,5 +99,4 @@ LLM_API_KEY
 
 `llm-host` should be the provider base URL, such as
 `https://api.openai.com/v1`; the backend appends the provider's chat-completion
-path. Only structured pipeline data already shown on the dashboard is sent to
-the model. The API key remains on the backend and is never sent to the browser.
+path. The API key remains on the backend and is never sent to the browser.
